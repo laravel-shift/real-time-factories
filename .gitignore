@@ -1,5 +1,5 @@
 /vendor/
-/build/
 .env
 /.phpunit.cache
 composer.lock
+database.sqlite

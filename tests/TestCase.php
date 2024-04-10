@@ -2,7 +2,7 @@
 
 namespace Tests;
 
-use Blueprint\RealTimeFactoriesServiceProvider;
+use Shift\RealTimeFactoriesServiceProvider;
 
 abstract class TestCase extends \Orchestra\Testbench\TestCase
 {
