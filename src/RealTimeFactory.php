@@ -243,18 +243,6 @@ class RealTimeFactory extends Factory
     }
 
     /**
-     * Determine whether the given cast is a date cast.
-     */
-    protected function isDateType(string $type): bool
-    {
-        return in_array($type, [
-            'date',
-            'datetime',
-            'datetimeoffset',
-        ]);
-    }
-
-    /**
      * Determine whether the given cast is a decimal cast.
      */
     protected function isDecimalCastable(string $key): int|bool
@@ -264,22 +252,6 @@ class RealTimeFactory extends Factory
         }
 
         return false;
-    }
-
-    /**
-     * Determine whether the given type is a decimal type.
-     */
-    protected function isDecimalType(string $type): bool
-    {
-        return in_array($type, [
-            'decimal',
-            'numeric',
-            'double',
-            'float8',
-            'float',
-            'real',
-            'float4',
-        ]);
     }
 
     /**
@@ -315,25 +287,6 @@ class RealTimeFactory extends Factory
     protected function isIntegerCastable(string $key): bool
     {
         return in_array($key, ['int', 'integer']);
-    }
-
-    /**
-     * Determine whether the given type is an integer type.
-     */
-    protected function isIntegerType(string $type): bool
-    {
-        return in_array($type, [
-            'bigint',
-            'int8',
-            'integer',
-            'int',
-            'int4',
-            'mediumint',
-            'smallint',
-            'int2',
-            'tinyint',
-            'tinytext',
-        ]);
     }
 
     /**
@@ -404,10 +357,9 @@ class RealTimeFactory extends Factory
     /**
      * Generate a string value.
      */
-    protected function stringValue(array $column): string
+    protected function stringValue(?int $length): string
     {
-        // TODO:
-        return fake()->text($column['length'] ?? 10);
+        return fake()->text($length ?? 10);
     }
 
     /**
@@ -420,8 +372,6 @@ class RealTimeFactory extends Factory
 
     /**
      * Generate a value for the given column.
-     *
-     * @return void
      */
     protected function value(array $column): mixed
     {
@@ -429,15 +379,17 @@ class RealTimeFactory extends Factory
             return $value;
         }
 
-        return ($value = $this->valueFromCast($column)) ?
+        $type = $this->parseColumnType($column);
+
+        return ($value = $this->valueFromCast($column, $type)) ?
             $value :
-            $this->valueFromColumn($column);
+            $this->valueFromColumn($column, $type);
     }
 
     /**
      * Generate a value using the defined cast for the column.
      */
-    protected function valueFromCast($column): mixed
+    protected function valueFromCast(array $column, array $type): mixed
     {
         if (in_array($column['name'], $this->modelInstance->getDates())) {
             return $this->dateValue();
@@ -484,7 +436,7 @@ class RealTimeFactory extends Factory
         }
 
         if ($this->isStringCastable($key)) {
-            return $this->stringValue($column);
+            return $this->stringValue($type['length'] ?? null);
         }
 
         return null;
@@ -493,73 +445,153 @@ class RealTimeFactory extends Factory
     /**
      * Generate a value for the given column.
      */
-    protected function valueFromColumn(array $column): mixed
+    protected function valueFromColumn(array $column, array $type): mixed
     {
         if ($column['nullable'] && $column['default'] === null) {
             return null;
         }
 
-        if ($value = $column['default']) {
-            return Str::trim($value, '"\'');
+        if ($value = $this->parseDefaultExpression($column['default'])) {
+            return $value;
         }
 
-        if ($this->isDecimalType($column['type_name'])) {
-            if (str_contains($column['type'], '(')) {
-                [$scale, $precision] = explode(',', Str::between($column['type'], '(', ')'));
+        return match ($type['name']) {
+            'integer' => $this->integerValue(),
+            'date' => $this->dateValue(),
+            'numeric' => $this->decimalValue($type['precision'] ?? 10, $type['scale'] ?? 2),
+            'time' => fake()->time(),
+            'datetime', 'dateTimeTz' => fake()->dateTime(),
+            'timestamp', 'timestampTz' => $this->timestampValue(),
+            'text' => fake()->text(),
+            'boolean' => $this->booleanValue(),
+            'json' => $this->jsonValue(),
+            'enum' => fake()->randomElement($type['values'] ?? []),
+            'set' => fake()->randomElements($type['values'] ?? []),
+            default => $this->stringValue($type['length'] ?? null),
+        };
+    }
+
+    /**
+     * Map a database type name into equivalent column type.
+     */
+    public function parseColumnType(array $column): array
+    {
+        $type = match ($column['type']) {
+            'tinyint(1)', 'bit' => 'boolean',
+            'varchar(max)', 'nvarchar(max)' => 'text',
+            default => null,
+        };
+
+        $type ??= match ($column['type_name']) {
+            'integer', 'int', 'int4', 'smallint', 'int2', 'tinyint', 'mediumint', 'bigint', 'int8' => 'integer',
+            'date' => 'date',
+            'numeric', 'decimal', 'float', 'real', 'float4', 'double', 'float8' => 'numeric',
+            'time', 'timetz' => 'time',
+            'datetime', 'datetime2', 'smalldatetime','datetimeoffset' => 'datetime',
+            'timestamp', 'timestamptz' => 'timestamp',
+            'text', 'ntext', 'tinytext', 'mediumtext', 'longtext' => 'text',
+            'boolean', 'bool' => 'boolean',
+            'json', 'jsonb' => 'json',
+            'enum' => 'enum',
+            'set' => 'set',
+
+            'char', 'bpchar', 'nchar' => 'char',
+            'varchar', 'nvarchar' => 'string',
+            'binary', 'varbinary', 'bytea', 'image', 'blob', 'tinyblob', 'mediumblob', 'longblob' => 'binary',
+            'year' => 'year',
+            'uuid', 'uniqueidentifier' => 'uuid',
+            'macaddr', 'macaddr8' => 'mac_address',
+            'inet', 'inet4', 'inet6', 'cidr' => 'ip_address',
+            'geometry', 'geometrycollection', 'linestring', 'multilinestring', 'point', 'multipoint', 'polygon', 'multipolygon' => 'geometry',
+            'geography' => 'geography',
+
+            // 'money', 'smallmoney' => 'money',
+            // 'bit', 'varbit' => 'bit',
+            // 'xml' => 'xml',
+            // 'interval' => 'interval',
+            // 'box', 'circle', 'line', 'lseg', 'path' => 'geometry',
+            // 'tsvector', 'tsquery' => 'text',
+            default => null,
+        };
+
+        $values = str_contains($column['type'], '(')
+            ? str_getcsv(Str::between($column['type'], '(', ')'), ",", "'")
+            : null;
+
+        $values = is_null($values) ? [] : match ($type) {
+            'string', 'char', 'binary', 'bit' => ['length' => (int) $values[0]],
+            'datetime', 'time', 'timestamp' => ['precision' => (int) $values[0]],
+            'numeric' => ['precision' => (int) $values[0], 'scale' => isset($values[1]) ? (int) $values[1] : null],
+            'enum', 'set' => ['values' => $values],
+            'geometry', 'geography' => ['subtype' => $values[0] ?? $column['type_name'] ?? null, 'srid' => isset($values[1]) ? (int) $values[1] : null],
+            default => [],
+        };
+
+        return array_merge(['name' => $type], array_filter($values));
+    }
+
+    protected function parseDefaultExpression(?string $default): mixed
+    {
+        if (blank($default)) {
+            return null;
+        }
+
+        $driver = $this->modelInstance->getConnection()->getDriverName();
+
+        if ($driver === 'mysql') {
+            if ($default === 'NULL'
+                || preg_match("/^\(.*\)$/", $default) === 1
+                || str_ends_with($default, '()')
+                || str_starts_with(strtolower($default), 'current_timestamp')) {
+                return null;
             }
 
-            $this->decimalValue($precision ?? 2, $scale ?? 100);
+            if (preg_match("/^'(.*)'$/", $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
         }
 
-        return match (true) {
-            $this->isIntegerType($column['type_name']) => $this->integerValue(),
-            $this->isDateType($column['type_name']) => $this->dateValue(),
-            $this->isTimeType($column['type_name']) => fake()->time(),
-            $this->isBlobType($column['type_name']) => fake()->text(),
-            $this->isBooleanType($column['type_name']) => $this->booleanValue(),
-            $this->isJsonType($column['type_name']) => $this->jsonValue(),
-            default => $this->stringValue($column),
-        };
+        if ($driver === 'pgsql') {
+            if (str_starts_with($default, 'NULL::')) {
+                $default = null;
+            }
+
+            if (preg_match("/^['(](.*)[')]::/", $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
+        }
+
+        if ($driver === 'sqlsrv') {
+            while (preg_match('/^\((.*)\)$/', $default, $matches)) {
+                $default = $matches[1];
+            }
+
+            if ($default === 'NULL'
+                || str_ends_with($default, '()')) {
+                return null;
+            }
+
+            if (preg_match('/^\'(.*)\'$/', $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
+        }
+
+        if ($driver === 'sqlite') {
+            if ($default === 'NULL'
+                || str_starts_with(strtolower($default), 'current_timestamp')) {
+                return null;
+            }
+
+            if (preg_match('/^\'(.*)\'$/s', $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
+        }
+
+        return $default;
     }
 
     private function isAutoIncrement(array $column): bool
     {
         return $column['auto_increment'];
-    }
-
-    private function isBlobType(string $type): bool
-    {
-        return in_array($type, [
-            'text',
-            'ntext',
-            'mediumtext',
-            'longtext',
-        ]);
-    }
-
-    private function isBooleanType(string $type): bool
-    {
-        return in_array($type, [
-            'boolean',
-            'bool',
-        ]);
-    }
-
-    private function isJsonType(string $type): bool
-    {
-        return in_array($type, [
-            'json',
-            'jsonb',
-        ]);
-    }
-
-    private function isTimeType(string $type): bool
-    {
-        return in_array($type, [
-            'time',
-            'timestamp',
-            'timestamptz',
-            'timetz',
-        ]);
     }
 }
