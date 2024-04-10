@@ -1,0 +1,50 @@
+{
+    "name": "laravel-shift/real-time-factories",
+    "type": "library",
+    "description": "Generate model factories dynamically.",
+    "keywords": [
+        "framework",
+        "laravel",
+        "code generation",
+        "testing"
+    ],
+    "license": "MIT",
+    "require": {
+        "illuminate/console": "^10.38|^11.0",
+        "illuminate/database": "^10.38|^11.0",
+        "illuminate/filesystem": "^10.38|^11.0",
+        "illuminate/support": "^10.38|^11.0",
+        "laravel-shift/faker-registry": "^0.3.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.2",
+        "mockery/mockery": "^1.4.4",
+        "orchestra/testbench": "^8.0|^9.0",
+        "phpunit/phpunit": "^10.0"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Shift\\RealTimeFactoryServiceProvider"
+            ]
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Shift\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        },
+        "exclude-from-classmap": [
+            "tests/fixtures/"
+        ]
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

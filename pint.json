@@ -1,0 +1,11 @@
+{
+    "preset": "laravel",
+    "rules": {
+        "blank_line_before_statement": {
+            "statements": ["return", "try"]
+        }
+    },
+    "notPath": [
+        "tests/fixtures"
+    ]
+}

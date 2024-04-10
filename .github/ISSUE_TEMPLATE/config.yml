@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: General question
+    url: https://twitter.com/laravelshift
+    about: If you have a question or need help using Blueprint, ask on Twitter
