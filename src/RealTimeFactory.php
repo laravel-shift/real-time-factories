@@ -468,7 +468,7 @@ class RealTimeFactory extends Factory
             'enum' => fake()->randomElement($type['values'] ?? []),
             'set' => fake()->randomElements($type['values'] ?? []),
             'uuid' => fake()->uuid(),
-            'ip_address' => fake()->ipv6(),
+            'ip_address' => fake()->ipv4(),
             'mac_address' => fake()->macAddress(),
             'year' => fake()->year(),
             default => $this->stringValue($type['length'] ?? null),
