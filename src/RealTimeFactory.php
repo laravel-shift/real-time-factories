@@ -90,6 +90,65 @@ class RealTimeFactory extends Factory
     }
 
     /**
+     * Map a database type name into equivalent column type.
+     */
+    public function parseColumnType(array $column): array
+    {
+        $type = match ($column['type']) {
+            'tinyint(1)', 'bit' => 'boolean',
+            'varchar(max)', 'nvarchar(max)' => 'text',
+            default => null,
+        };
+
+        $type ??= match ($column['type_name']) {
+            'integer', 'int', 'int4', 'smallint', 'int2', 'tinyint', 'mediumint', 'bigint', 'int8' => 'integer',
+            'date' => 'date',
+            'numeric', 'decimal', 'float', 'real', 'float4', 'double', 'float8' => 'numeric',
+            'time', 'timetz' => 'time',
+            'datetime', 'datetime2', 'smalldatetime','datetimeoffset' => 'datetime',
+            'timestamp', 'timestamptz' => 'timestamp',
+            'text', 'ntext', 'tinytext', 'mediumtext', 'longtext' => 'text',
+            'boolean', 'bool' => 'boolean',
+            'json', 'jsonb' => 'json',
+            'enum' => 'enum',
+            'set' => 'set',
+            'uuid', 'uniqueidentifier' => 'uuid',
+            'inet', 'inet4', 'inet6', 'cidr' => 'ip_address',
+            'macaddr', 'macaddr8' => 'mac_address',
+            'year' => 'year',
+
+            'char', 'bpchar', 'nchar' => 'char',
+            'varchar', 'nvarchar' => 'string',
+            'binary', 'varbinary', 'bytea', 'image', 'blob', 'tinyblob', 'mediumblob', 'longblob' => 'binary',
+            'geometry', 'geometrycollection', 'linestring', 'multilinestring', 'point', 'multipoint', 'polygon', 'multipolygon' => 'geometry',
+            'geography' => 'geography',
+
+            // 'money', 'smallmoney' => 'money',
+            // 'bit', 'varbit' => 'bit',
+            // 'xml' => 'xml',
+            // 'interval' => 'interval',
+            // 'box', 'circle', 'line', 'lseg', 'path' => 'geometry',
+            // 'tsvector', 'tsquery' => 'text',
+            default => null,
+        };
+
+        $values = str_contains($column['type'], '(')
+            ? str_getcsv(Str::between($column['type'], '(', ')'), ',', "'")
+            : null;
+
+        $values = is_null($values) ? [] : match ($type) {
+            'string', 'char', 'binary', 'bit' => ['length' => (int) $values[0]],
+            'datetime', 'time', 'timestamp' => ['precision' => (int) $values[0]],
+            'numeric' => ['precision' => (int) $values[0], 'scale' => isset($values[1]) ? (int) $values[1] : null],
+            'enum', 'set' => ['values' => $values],
+            'geometry', 'geography' => ['subtype' => $values[0] ?? $column['type_name'] ?? null, 'srid' => isset($values[1]) ? (int) $values[1] : null],
+            default => [],
+        };
+
+        return array_merge(['name' => $type], array_filter($values));
+    }
+
+    /**
      * Generate an array value.
      */
     protected function arrayValue(): array
@@ -140,16 +199,6 @@ class RealTimeFactory extends Factory
         $case = Arr::random($enum::cases());
 
         return $case instanceof BackedEnum ? $case->value : $case->name;
-    }
-
-    /**
-     * Get the table columns from the model.
-     */
-    protected function getColumnsFromModel(): Collection
-    {
-        $columns = $this->schema->getColumns($this->table);
-
-        return collect($columns)->keyBy('name');
     }
 
     /**
@@ -219,59 +268,6 @@ class RealTimeFactory extends Factory
     }
 
     /**
-     * Determine whether the given cast is an array cast.
-     */
-    protected function isArrayCastable(string $key): bool
-    {
-        return in_array($key, ['array', 'json', 'object', 'collection', 'encrypted:array', 'encrypted:collection', 'encrypted:json', 'encrypted:object', AsArrayObject::class, AsCollection::class, AsEncryptedArrayObject::class, AsEncryptedCollection::class]);
-    }
-
-    /**
-     * Determine whether the given cast is a boolean cast.
-     */
-    protected function isBooleanCastable(string $key): bool
-    {
-        return in_array($key, ['bool', 'boolean']);
-    }
-
-    /**
-     * Determine whether the given cast is a date cast.
-     */
-    protected function isDateCastable(string $key): bool
-    {
-        return in_array($key, ['date', 'datetime', 'immutable_date', 'immutable_datetime']);
-    }
-
-    /**
-     * Determine whether the given cast is a decimal cast.
-     */
-    protected function isDecimalCastable(string $key): int|bool
-    {
-        if (Str::startsWith($key, 'decimal')) {
-            return (int) Str::after($key, ':');
-        }
-
-        return false;
-    }
-
-    /**
-     * Determine whether the given cast is an enum cast.
-     */
-    protected function isEnumCastable(string $key): bool
-    {
-        return enum_exists(Str::after($key, ':'));
-    }
-
-    /**
-     * Determine whether the given cast is an enum collection cast.
-     */
-    protected function isEnumCollectionCastable(string $key): bool
-    {
-        return in_array(Str::before($key, ':'), [AsEnumCollection::class, AsEnumArrayObject::class]) &&
-            $this->isEnumCastable($key);
-    }
-
-    /**
      * Determine whether the given column is a foreign key.
      */
     protected function isForeignKey(array $column): bool
@@ -282,48 +278,12 @@ class RealTimeFactory extends Factory
     }
 
     /**
-     * Determine whether the given cast is an integer cast.
-     */
-    protected function isIntegerCastable(string $key): bool
-    {
-        return in_array($key, ['int', 'integer']);
-    }
-
-    /**
      * Determine whether the given column is the primary key.
      */
     protected function isPrimaryKey(array $column): bool
     {
         return collect($this->schema->getIndexes($this->table))
             ->some(fn ($index) => $index['primary'] && in_array($column['name'], $index['columns']));
-    }
-
-    /**
-     * Determine whether the given cast is a real number cast.
-     */
-    protected function isRealCastable(string $key): bool
-    {
-        return in_array($key, ['real', 'float', 'double']);
-    }
-
-    /**
-     * Determine whether the given cast is a string cast.
-     */
-    protected function isStringCastable(string $key): bool
-    {
-        return in_array($key, [
-            'string',
-            'encrypted',
-            AsStringable::class,
-        ]);
-    }
-
-    /**
-     * Determine whether the given cast is a timestamp cast.
-     */
-    protected function isTimestampCastable(string $key): bool
-    {
-        return $key === 'timestamp';
     }
 
     /**
@@ -344,6 +304,66 @@ class RealTimeFactory extends Factory
         return parent::newInstance($arguments)
             ->forModel($this->model)
             ->configure();
+    }
+
+    protected function parseDefaultExpression(?string $default): mixed
+    {
+        if (blank($default)) {
+            return null;
+        }
+
+        $driver = $this->modelInstance->getConnection()->getDriverName();
+
+        if ($driver === 'mysql') {
+            if ($default === 'NULL'
+                || preg_match("/^\(.*\)$/", $default) === 1
+                || str_ends_with($default, '()')
+                || str_starts_with(strtolower($default), 'current_timestamp')) {
+                return null;
+            }
+
+            if (preg_match("/^'(.*)'$/", $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
+        }
+
+        if ($driver === 'pgsql') {
+            if (str_starts_with($default, 'NULL::')) {
+                $default = null;
+            }
+
+            if (preg_match("/^['(](.*)[')]::/", $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
+        }
+
+        if ($driver === 'sqlsrv') {
+            while (preg_match('/^\((.*)\)$/', $default, $matches)) {
+                $default = $matches[1];
+            }
+
+            if ($default === 'NULL'
+                || str_ends_with($default, '()')) {
+                return null;
+            }
+
+            if (preg_match('/^\'(.*)\'$/', $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
+        }
+
+        if ($driver === 'sqlite') {
+            if ($default === 'NULL'
+                || str_starts_with(strtolower($default), 'current_timestamp')) {
+                return null;
+            }
+
+            if (preg_match('/^\'(.*)\'$/s', $default, $matches) === 1) {
+                return str_replace("''", "'", $matches[1]);
+            }
+        }
+
+        return $default;
     }
 
     /**
@@ -476,126 +496,106 @@ class RealTimeFactory extends Factory
     }
 
     /**
-     * Map a database type name into equivalent column type.
+     * Get the table columns from the model.
      */
-    public function parseColumnType(array $column): array
+    private function getColumnsFromModel(): Collection
     {
-        $type = match ($column['type']) {
-            'tinyint(1)', 'bit' => 'boolean',
-            'varchar(max)', 'nvarchar(max)' => 'text',
-            default => null,
-        };
+        $columns = $this->schema->getColumns($this->table);
 
-        $type ??= match ($column['type_name']) {
-            'integer', 'int', 'int4', 'smallint', 'int2', 'tinyint', 'mediumint', 'bigint', 'int8' => 'integer',
-            'date' => 'date',
-            'numeric', 'decimal', 'float', 'real', 'float4', 'double', 'float8' => 'numeric',
-            'time', 'timetz' => 'time',
-            'datetime', 'datetime2', 'smalldatetime','datetimeoffset' => 'datetime',
-            'timestamp', 'timestamptz' => 'timestamp',
-            'text', 'ntext', 'tinytext', 'mediumtext', 'longtext' => 'text',
-            'boolean', 'bool' => 'boolean',
-            'json', 'jsonb' => 'json',
-            'enum' => 'enum',
-            'set' => 'set',
-            'uuid', 'uniqueidentifier' => 'uuid',
-            'inet', 'inet4', 'inet6', 'cidr' => 'ip_address',
-            'macaddr', 'macaddr8' => 'mac_address',
-            'year' => 'year',
-
-            'char', 'bpchar', 'nchar' => 'char',
-            'varchar', 'nvarchar' => 'string',
-            'binary', 'varbinary', 'bytea', 'image', 'blob', 'tinyblob', 'mediumblob', 'longblob' => 'binary',
-            'geometry', 'geometrycollection', 'linestring', 'multilinestring', 'point', 'multipoint', 'polygon', 'multipolygon' => 'geometry',
-            'geography' => 'geography',
-
-            // 'money', 'smallmoney' => 'money',
-            // 'bit', 'varbit' => 'bit',
-            // 'xml' => 'xml',
-            // 'interval' => 'interval',
-            // 'box', 'circle', 'line', 'lseg', 'path' => 'geometry',
-            // 'tsvector', 'tsquery' => 'text',
-            default => null,
-        };
-
-        $values = str_contains($column['type'], '(')
-            ? str_getcsv(Str::between($column['type'], '(', ')'), ",", "'")
-            : null;
-
-        $values = is_null($values) ? [] : match ($type) {
-            'string', 'char', 'binary', 'bit' => ['length' => (int) $values[0]],
-            'datetime', 'time', 'timestamp' => ['precision' => (int) $values[0]],
-            'numeric' => ['precision' => (int) $values[0], 'scale' => isset($values[1]) ? (int) $values[1] : null],
-            'enum', 'set' => ['values' => $values],
-            'geometry', 'geography' => ['subtype' => $values[0] ?? $column['type_name'] ?? null, 'srid' => isset($values[1]) ? (int) $values[1] : null],
-            default => [],
-        };
-
-        return array_merge(['name' => $type], array_filter($values));
+        return collect($columns)->keyBy('name');
     }
 
-    protected function parseDefaultExpression(?string $default): mixed
+    /**
+     * Determine whether the given cast is an array cast.
+     */
+    private function isArrayCastable(string $key): bool
     {
-        if (blank($default)) {
-            return null;
-        }
-
-        $driver = $this->modelInstance->getConnection()->getDriverName();
-
-        if ($driver === 'mysql') {
-            if ($default === 'NULL'
-                || preg_match("/^\(.*\)$/", $default) === 1
-                || str_ends_with($default, '()')
-                || str_starts_with(strtolower($default), 'current_timestamp')) {
-                return null;
-            }
-
-            if (preg_match("/^'(.*)'$/", $default, $matches) === 1) {
-                return str_replace("''", "'", $matches[1]);
-            }
-        }
-
-        if ($driver === 'pgsql') {
-            if (str_starts_with($default, 'NULL::')) {
-                $default = null;
-            }
-
-            if (preg_match("/^['(](.*)[')]::/", $default, $matches) === 1) {
-                return str_replace("''", "'", $matches[1]);
-            }
-        }
-
-        if ($driver === 'sqlsrv') {
-            while (preg_match('/^\((.*)\)$/', $default, $matches)) {
-                $default = $matches[1];
-            }
-
-            if ($default === 'NULL'
-                || str_ends_with($default, '()')) {
-                return null;
-            }
-
-            if (preg_match('/^\'(.*)\'$/', $default, $matches) === 1) {
-                return str_replace("''", "'", $matches[1]);
-            }
-        }
-
-        if ($driver === 'sqlite') {
-            if ($default === 'NULL'
-                || str_starts_with(strtolower($default), 'current_timestamp')) {
-                return null;
-            }
-
-            if (preg_match('/^\'(.*)\'$/s', $default, $matches) === 1) {
-                return str_replace("''", "'", $matches[1]);
-            }
-        }
-
-        return $default;
+        return in_array($key, ['array', 'json', 'object', 'collection', 'encrypted:array', 'encrypted:collection', 'encrypted:json', 'encrypted:object', AsArrayObject::class, AsCollection::class, AsEncryptedArrayObject::class, AsEncryptedCollection::class]);
     }
 
     private function isAutoIncrement(array $column): bool
     {
         return $column['auto_increment'];
+    }
+
+    /**
+     * Determine whether the given cast is a boolean cast.
+     */
+    private function isBooleanCastable(string $key): bool
+    {
+        return in_array($key, ['bool', 'boolean']);
+    }
+
+    /**
+     * Determine whether the given cast is a date cast.
+     */
+    private function isDateCastable(string $key): bool
+    {
+        return in_array($key, ['date', 'datetime', 'immutable_date', 'immutable_datetime']);
+    }
+
+    /**
+     * Determine whether the given cast is a decimal cast.
+     */
+    private function isDecimalCastable(string $key): int|bool
+    {
+        if (Str::startsWith($key, 'decimal')) {
+            return (int) Str::after($key, ':');
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine whether the given cast is an enum cast.
+     */
+    private function isEnumCastable(string $key): bool
+    {
+        return enum_exists(Str::after($key, ':'));
+    }
+
+    /**
+     * Determine whether the given cast is an enum collection cast.
+     */
+    private function isEnumCollectionCastable(string $key): bool
+    {
+        return in_array(Str::before($key, ':'), [AsEnumCollection::class, AsEnumArrayObject::class]) &&
+            $this->isEnumCastable($key);
+    }
+
+    /**
+     * Determine whether the given cast is an integer cast.
+     */
+    private function isIntegerCastable(string $key): bool
+    {
+        return in_array($key, ['int', 'integer']);
+    }
+
+    /**
+     * Determine whether the given cast is a real number cast.
+     */
+    private function isRealCastable(string $key): bool
+    {
+        return in_array($key, ['real', 'float', 'double']);
+    }
+
+    /**
+     * Determine whether the given cast is a string cast.
+     */
+    private function isStringCastable(string $key): bool
+    {
+        return in_array($key, [
+            'string',
+            'encrypted',
+            AsStringable::class,
+        ]);
+    }
+
+    /**
+     * Determine whether the given cast is a timestamp cast.
+     */
+    private function isTimestampCastable(string $key): bool
+    {
+        return $key === 'timestamp';
     }
 }
